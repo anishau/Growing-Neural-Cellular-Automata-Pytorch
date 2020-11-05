@@ -12,6 +12,7 @@ import math
 import argparse
 from torchvision import transforms
 from Particle_Sim import ParticleSystem
+from vid import VideoPlayer
 random.seed(2574)
 
 def to_rgb(x):
@@ -19,6 +20,7 @@ def to_rgb(x):
     return torch.clamp(rgb, 0.0, 1.0)
 
 def show_tensor_surfaces(t):
+    print(t)
     if (len(t.shape) < 4):
         plt.axis('off')
         plt.set_cmap('inferno')
@@ -62,13 +64,13 @@ class CASimulator():
         self.step_size = 1.0
         self.update_probability = 0.5
         self.cur_batch_size = 16
-        self.train_steps = 64000
+        self.train_steps = 5000
         self.min_sim_steps = 6
         self.max_sim_steps = 6
         self.step_increase_interval = 128
         self.updates_per_step = 8
         self.comp_loss_interval = 8
-        self.device = torch.device('cuda')
+        self.device = torch.device('cpu')
         self.ca_model = CAModel(self.ENV_D)
         self.ca_model = self.ca_model.to(self.device)
 
@@ -82,7 +84,16 @@ class CASimulator():
         # lr decay + sigmoid warm-up for training restarts
         self.lr_schedule = lambda x: (1/(1+math.exp(-0.2*x+5)))*1e-3*2.0**(-0.0002*x) #lambda x: 2e-3 if x<4000 else 3e-4
 
+   
     def initialize_particle_sims(self):
+        self.p_sims = [
+            VideoPlayer("water.mp4") 
+            for i in range(self.cur_batch_size)
+        ]
+
+
+
+    '''def initialize_particle_sims(self):
         self.p_sims = [
             ParticleSystem(
                 random.randint(3,self.particle_count), 
@@ -94,11 +105,12 @@ class CASimulator():
                 i
             ) 
             for i in range(self.cur_batch_size)
-        ]
+        ]'''
 
     def draw_states(self):
         blank = torch.zeros(self.cur_batch_size, self.ENV_D, self.ENV_X, self.ENV_Y, device=self.device)
         blank[:,0:3,:,:] = torch.tensor([ps.draw() for ps in self.p_sims], device=self.device).permute(0,3,1,2)
+ 
         return blank
 
     def run_particles(self, num_steps):
@@ -107,7 +119,7 @@ class CASimulator():
                 ps.sim()
 
     def load_pretrained(self, path):
-        self.ca_model.load_state_dict(torch.load(path))
+        self.ca_model.load_state_dict(torch.load(path,map_location=torch.device('cpu')))
 
     def wrap_edges(self, x):
         return F.pad(x, (1,1,1,1), 'constant', 0.0) #'circular', 0)
@@ -170,11 +182,13 @@ class CASimulator():
             #self.current_states = self.initial_state.repeat(self.cur_batch_size,1,1,1)
             #self.initialize_particle_sims()
             self.current_states = self.draw_states()
+            print(self.current_states.shape)
             num_steps = self.max_sim_steps*self.updates_per_step #random.randint(self.min_sim_steps,min(idx//self.step_increase_interval+1,self.max_sim_steps))*self.updates_per_step
             self.run_sim(num_steps, idx, (idx+1)%self.evolution_interval == 0)
             if (idx % self.final_plot_interval == 0):
                 #show_final_target(self.input_matsA, self.input_matsB, self.current_states)
                 show_tensor_surfaces(self.current_states)
+                print(self.current_states)
                 #show_tensor_surfaces(self.final_states)
                 plt.savefig(f'output/out{idx:06d}.png')
                 plt.close('all')
@@ -209,9 +223,8 @@ if __name__ == '__main__':
 
     if args.run_pretrained:
         print('running pretained')
-        ca_sim.load_pretrained(f'checkpoints/{args.pretrained_path}.pt')
+        ca_sim.load_pretrained(f'{args.pretrained_path}')
         ca_sim.run_pretrained(50000)
     else:
-        ca_sim.load_pretrained(f'checkpoints/ca_model_short_d.pt')
         ca_sim.train_ca()
         
